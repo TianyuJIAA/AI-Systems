@@ -113,4 +113,83 @@ tmpfs                     3.8G         0      3.8G   0% /sys/firmware
 
 ## Docker部署Pytorch训练程序
 
-在使用Docker部署应用程序时，一般要先写Dockerfile，通过
+
+在使用Docker部署应用程序时，一般要先写Dockerfile，通过其构建镜像，然后启动容器。
+
+### 构建Dockerfile
+
+Docker会按顺序通过Dockerfile在构建阶段执行一系列Docker命令:
+```bash
+# 基础镜像
+FROM nvidia/cuda:12.6.3-base-ubuntu20.04
+
+# 创建镜像中的文件夹，用于存储新的代码或文件
+RUN mkdir -p /src/app
+
+# WORKDIR指令设置Dockerfile中的任何RUN,CMD,ENTRPOINT,COPY和ADD指令的工作目录
+WORKDIR /src/app
+
+# 拷贝本地文件到Docker镜像中相应目录
+COPY mnist/main.py /src/app
+
+ENV CONDA_AUTO_YES=true
+
+# 需要安装的依赖
+RUN apt-get update && apt-get install wget -y
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh -O miniconda.sh
+RUN bash miniconda.sh -b -p /opt/conda
+ENV PATH /opt/conda/bin:$PATH
+
+RUN pip install torch torchvision
+
+# 容器启动命令
+CMD ["python", "main.py"]
+```
+
+### 构建Docker镜像
+
+上面构建了Dockerfile文件，接下来通过下面的命令来构建Docker镜像:
+```bash
+docker build -f Dockerfile.gpu -t train_dl .
+```
+
+`docker build` : 通过Dockerfile进而构建镜像的命令。
+
+` -t` : 't'代表标签。用户通过标签未来可以确定相应的镜像。
+
+`train_dl` : 给镜像打上的标签名字。
+
+` . ` : 希望构建进镜像中的Dockerfile的相对路径。
+
+` -f ` : 指定构建进镜像中的Dockerfile。
+
+` Dockerfile.gpu` : 构建进镜像中的Dockerfile的文件名，如果机器没有GPU，可以用Dockerfile.cpu文件。
+
+最后看下创建好的镜像文件:
+```bash
+$ docker images
+REPOSITORY    TAG                       IMAGE ID       CREATED         SIZE
+train_dl      latest                    d0a65a9b1b17   7 seconds ago   1.68GB
+alpine        latest                    44a37b14f342   2 days ago      8.18MB
+nvidia/cuda   12.6.3-base-ubuntu20.04   58e13fba4d04   2 weeks ago     238MB
+hello-world   latest                    ee301c921b8a   19 months ago   9.14kB
+```
+
+### 启动镜像
+
+启动刚才构建的镜像:
+```bash
+docker run --name training train_dl
+
+......
+Train Epoch: 1 [0/60000 (0%)]   Loss: 2.329474
+Train Epoch: 1 [640/60000 (1%)] Loss: 1.422901
+Train Epoch: 1 [1280/60000 (2%)]        Loss: 1.004950
+Train Epoch: 1 [1920/60000 (3%)]        Loss: 0.605173
+Train Epoch: 1 [2560/60000 (4%)]        Loss: 0.456048
+......
+```
+
+## Docker部署Pytorch推理程序
+
+
