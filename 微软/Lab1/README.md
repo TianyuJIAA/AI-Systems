@@ -192,4 +192,150 @@ Train Epoch: 1 [2560/60000 (4%)]        Loss: 0.456048
 
 ## Docker部署Pytorch推理程序
 
+### 创建TorchServer镜像
+
+准备TorchServe源码:
+```bash
+git clone https://github.com/pytorch/serve.git
+```
+
+创建基于CPU镜像
+
+```bash
+$ docker build --file Dockerfile.infer.cpu -t torchserve:0.1-cpu .
+$ docker images
+REPOSITORY    TAG                       IMAGE ID       CREATED          SIZE
+torchserve    0.1-cpu                   4ca9cef15321   15 seconds ago   2.01GB
+```
+
+### 使用TorchServe镜像启动一个容器
+
+启动CPU容器,打开8080/81端口，并暴露给主机
+
+```bash
+$ docker run --rm -it -p 8080:8080 -p 8081:8081 torchserve:0.1-cpu
+```
+
+在相同的主机，访问TorchServe APIs, 可以通过主机的8080和8081端口访问
+```bash
+# 访问服务
+$ curl http://localhost:8080/ping
+
+{
+  "status": "Healthy"
+}
+```
+
+检查容器的端口映射
+```bash
+$ docker port 3775ce21d2ef
+
+# 返回结果
+8080/tcp -> 0.0.0.0:8080
+8081/tcp -> 0.0.0.0:8081
+```
+
+停止Torchserve容器
+```bash
+$ docker container stop 3775ce21d2ef
+```
+
+### 部署模型，进行推理
+
+使用TorchServe推理，第一步需要把模型使用model archiver归档为MAR文件
+
+这里使用的镜像是Dockerfile.tmp构建的镜像，models文件夹为模型文件和Python代码  
+
+模型文件通过在本地下载:
+```bash
+$ wget https://download.pytorch.org/models/densenet161-8d451a50.pth
+```
+
+python代码为[model.py](models/model.py)
+
+启动镜像后，进入容器:
+```bash
+# 查看容器id
+$ docker ps
+
+CONTAINER ID   IMAGE            COMMAND                  CREATED          STATUS         PORTS                                                       NAMES
+8877fe474c08   torchserve:tmp   "/usr/local/bin/dock…"   11 seconds ago   Up 10 seconds   7070-7071/tcp, 8082/tcp, 0.0.0.0:8080-8081->8080-8081/tcp   cool_hodgkin
+
+# 进入容器
+$ docker exec -it 8877fe474c08 /bin/bash
+
+$ ll
+
+total 113068
+drwxr-xr-x 1 model-server model-server      4096 Dec 12 14:24 ./
+drwxr-xr-x 1 root         root              4096 Sep 30 21:43 ../
+-rw-r--r-- 1 model-server model-server       220 Feb 25  2020 .bash_logout
+-rw-r--r-- 1 model-server model-server      3771 Feb 25  2020 .bashrc
+-rw-r--r-- 1 model-server model-server       807 Feb 25  2020 .profile
+-rw-rw-r-- 1 root         root               309 Sep 30 21:38 config.properties
+-rw-r--r-- 1 root         root         115730790 Dec 12 14:18 densenet161-8d451a50.pth
+drwxr-xr-x 3 model-server model-server      4096 Dec 12 14:24 logs/
+drwxr-xr-x 2 model-server root              4096 Sep 30 21:43 model-store/
+-rw-r--r-- 1 root         root              1093 Dec 12 13:51 model.py
+drwxr-xr-x 1 model-server root              4096 Dec 12 14:24 tmp/
+```
+
+使用model archiver进行模型归档
+```bash
+torch-model-archiver --model-name densenet161 --version 1.0 --model-file model.py --serialized-file densenet161-8d451a50.pth --export-path /home/model-server/model-store --handler image_classifier
+```
+
+启动Torchserve进行推理模型
+```bash
+# 先停止Torchserve
+$ torchserve --stop
+TorchServe has stopped.
+
+# 然后再次启动torchserve
+$ torchserve --start --ncs --model-store model-store --models densenet161.mar
+```
+
+成功启动打印了一些日志
+```bash
+Torchserve version: 0.12.0
+TS Home: /home/venv/lib/python3.9/site-packages
+Current directory: /home/model-server
+Temp directory: /home/model-server/tmp
+Metrics config path: /home/venv/lib/python3.9/site-packages/ts/configs/metrics.yaml
+Number of GPUs: 0
+Number of CPUs: 5
+Max heap size: 1964 M
+Python executable: /home/venv/bin/python
+Config file: config.properties
+Inference address: http://0.0.0.0:8080
+Management address: http://0.0.0.0:8081
+Metrics address: http://0.0.0.0:8082
+Model Store: /home/model-server/model-store
+Initial Models: densenet161.mar
+Log dir: /home/model-server/logs
+Metrics dir: /home/model-server/logs
+Netty threads: 32
+Netty client threads: 0
+......
+```
+
+使用模型进行推理:
+- 开启新的终端窗口
+- 使用`curl`命令下载一个实例并且通过表示将其重命名
+- 使用`curl`发送kitten图像，post到Torchserve的predict终端入口
+
+```bash
+$ curl -O https://s3.amazonaws.com/model-server/inputs/kitten.jpg
+$ curl -X POST http://127.0.0.1:8080/predictions/densenet161 -T kitten.jpg
+```
+
+结果出现了400，权限问题:
+```bash
+{
+  "code": 400,
+  "type": "InvalidKeyException",
+  "message": "Token Authorization failed. Token either incorrect, expired, or not provided correctly"
+}
+```
+
 

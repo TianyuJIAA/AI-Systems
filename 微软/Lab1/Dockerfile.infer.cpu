@@ -1,0 +1,87 @@
+# MIT License
+
+# Copyright (c) Microsoft Corporation.
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE
+
+
+FROM nvidia/cuda:12.6.3-base-ubuntu20.04
+
+ENV PYTHONUNBUFFERED TRUE
+
+# RUN apt-get update && \
+#     DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+#     fakeroot \
+#     ca-certificates \
+#     dpkg-dev \
+#     g++ \
+#     wget \
+#     openjdk-11-jdk \
+#     curl \
+#     vim \
+#     && rm -rf /var/lib/apt/lists/* \
+#     && cd /tmp \
+
+# 切换阿里源并安装必须的系统库
+RUN sed -i s/archive.ubuntu.com/mirrors.aliyun.com/g /etc/apt/sources.list \
+    && sed -i s/security.ubuntu.com/mirrors.aliyun.com/g /etc/apt/sources.list \
+    && apt-get update -y \ 
+    && apt-get install -y --no-install-recommends \
+    fakeroot \
+    ca-certificates \
+    dpkg-dev \
+    g++ \
+    openjdk-11-jdk \
+    curl \
+    vim \
+    wget \ 
+    git \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && cd /tmp
+
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh -O miniconda.sh
+RUN bash miniconda.sh -b -p /opt/conda
+ENV PATH /opt/conda/bin:$PATH
+
+RUN pip install --no-cache-dir psutil
+RUN pip install --no-cache-dir torch
+RUN pip install --no-cache-dir torchvision
+RUN pip install --no-cache-dir torchtext
+RUN pip install --no-cache-dir captum
+ADD serve serve
+RUN pip install -e serve/
+
+RUN useradd -m model-server \
+    && mkdir -p /home/model-server/tmp
+
+COPY dockerd-entrypoint.sh /usr/local/bin/dockerd-entrypoint.sh
+
+RUN chmod +x /usr/local/bin/dockerd-entrypoint.sh \
+    && chown -R model-server /home/model-server
+
+COPY config.properties /home/model-server/config.properties
+RUN mkdir /home/model-server/model-store && chown -R model-server /home/model-server/model-store
+
+EXPOSE 8080 8081
+
+WORKDIR /home/model-server
+ENV TEMP=/home/model-server/tmp
+ENTRYPOINT ["/usr/local/bin/dockerd-entrypoint.sh"]
+CMD ["serve"]
